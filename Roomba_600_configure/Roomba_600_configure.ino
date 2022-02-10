@@ -50,9 +50,9 @@ const String TOPIC_CHARGING = "roomba/charging";
 
 void log(String msg)
 {
-  Serial.print("*****");
-  Serial.print(msg);
-  Serial.println("*****");
+  //Serial.print("*****");
+  //Serial.print(msg);
+  //Serial.println("*****");
 }
 
 void publish(String topic, String msg)
