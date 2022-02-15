@@ -1,8 +1,15 @@
+#include <telnet.h>
+#include <RemoteDebug.h>
+#include <RemoteDebugCfg.h>
+#include <RemoteDebugWS.h>
+
+
+
 //This version is for the Roomba 600 Series
 //Connect a wire from D4 on the nodeMCU to the BRC pin on the roomba to prevent sleep mode.
 
 
-
+#include <DNSServer.h>
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
@@ -20,6 +27,9 @@ const char *mqtt_pass = NULL;
 const char *mqtt_client_name = "Roomba"; // Client connections can't have the same connection name
 //USER CONFIGURED SECTION END//
 
+//REMOTE DEBUG SECTION//
+RemoteDebug Debug;
+#define HOST_NAME "roomba"
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -50,9 +60,12 @@ const String TOPIC_CHARGING = "roomba/charging";
 
 void log(String msg)
 {
+#ifndef DEBUG_DISABLED
+  debugA("*****%s*****\n", msg.c_str());
   //Serial.print("*****");
   //Serial.print(msg);
   //Serial.println("*****");
+#endif
 }
 
 void publish(String topic, String msg)
@@ -61,49 +74,49 @@ void publish(String topic, String msg)
   client.publish(topic.c_str(), msg.c_str());
 }
 
-void setup_wifi() 
+void setup_wifi()
 {
   log("Setting up wifi");
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) 
+  while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
   }
 }
 
-void reconnect() 
+void reconnect()
 {
   // Loop until we're reconnected
   int retries = 0;
-  while (!client.connected()) 
+  while (!client.connected())
   {
-    if(retries < 50)
+    if (retries < 50)
     {
       log("Attempting to reconnect to MQTT");
       // Attempt to connect
       if (client.connect(mqtt_client_name, mqtt_user, mqtt_pass, TOPIC_STATUS.c_str(), 0, 0, "Dead Somewhere"))
       {
         // Once connected, publish an announcement...
-        if(boot == false)
+        if (boot == false)
         {
-          publish(TOPIC_CHECKIN, "Reconnected"); 
+          publish(TOPIC_CHECKIN, "Reconnected");
         }
-        if(boot == true)
+        if (boot == true)
         {
           publish(TOPIC_CHECKIN, "Rebooted");
           boot = false;
         }
         // ... and resubscribe
         client.subscribe(TOPIC_COMMANDS.c_str());
-      } 
-      else 
+      }
+      else
       {
         retries++;
         // Wait 5 seconds before retrying
         delay(5000);
       }
     }
-    if(retries >= 50)
+    if (retries >= 50)
     {
       log("Exceeded retry attempts. Restarting");
       ESP.restart();
@@ -111,12 +124,12 @@ void reconnect()
   }
 }
 
-void callback(char* topic, byte* payload, unsigned int length) 
+void callback(char* topic, byte* payload, unsigned int length)
 {
   String newTopic = topic;
   payload[length] = '\0';
   String newPayload = String((char *)payload);
-  if (newTopic == TOPIC_COMMANDS) 
+  if (newTopic == TOPIC_COMMANDS)
   {
     if (newPayload == "start")
     {
@@ -157,25 +170,25 @@ void stopCleaning()
 void sendInfoRoomba()
 {
   log("Getting info from roomba sensors");
-  roomba.start(); 
+  roomba.start();
   roomba.getSensors(21, tempBuf, 1);
   battery_Voltage = tempBuf[0];
   delay(50);
   roomba.getSensors(25, tempBuf, 2);
-  battery_Current_mAh = tempBuf[1]+256*tempBuf[0];
+  battery_Current_mAh = tempBuf[1] + 256 * tempBuf[0];
   delay(50);
   roomba.getSensors(26, tempBuf, 2);
-  battery_Total_mAh = tempBuf[1]+256*tempBuf[0];
-  if(battery_Total_mAh != 0)
+  battery_Total_mAh = tempBuf[1] + 256 * tempBuf[0];
+  if (battery_Total_mAh != 0)
   {
-    int nBatPcent = 100*battery_Current_mAh/battery_Total_mAh;
+    int nBatPcent = 100 * battery_Current_mAh / battery_Total_mAh;
     String temp_str2 = String(nBatPcent);
     temp_str2.toCharArray(battery_percent_send, temp_str2.length() + 1); //packaging up the data to publish to mqtt
     log("Got battery info. Publishing (" + temp_str2 + "%)");
     publish(TOPIC_BATTERY, battery_percent_send);
   }
-  if(battery_Total_mAh == 0)
-  {  
+  if (battery_Total_mAh == 0)
+  {
     log("Failed to get battery info. Publishing error");
     publish(TOPIC_BATTERY, "NO DATA");
   }
@@ -198,26 +211,29 @@ void stayAwakeHigh()
 
 
 
-void setup() 
+void setup()
 {
   pinMode(noSleepPin, OUTPUT);
   digitalWrite(noSleepPin, HIGH);
   Serial.begin(115200);
-  log("Start of program");
   Serial.write(129);
   delay(50);
   Serial.write(11);
   delay(50);
   setup_wifi();
+  Debug.begin(HOST_NAME);
+  //Debug.setResetCmdEnabled(true); // Enable the reset command
+  //Debug.setSerialEnabled(false);
+  log("Start of program");
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
   timer.setInterval(5000, sendInfoRoomba);
   timer.setInterval(60000, stayAwakeLow);
 }
 
-void loop() 
+void loop()
 {
-  if (!client.connected()) 
+  if (!client.connected())
   {
     reconnect();
   }
