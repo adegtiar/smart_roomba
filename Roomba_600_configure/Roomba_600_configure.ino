@@ -170,8 +170,8 @@ void startCleaning()
   log("Sending cleaning command");
   Serial.write(128);
   delay(50);
-  Serial.write(131);
-  delay(50);
+  //Serial.write(131);
+  //delay(50);
   Serial.write(135);
   publish(TOPIC_STATUS, "Cleaning");
   log("Done sending cleaning command. Publishing status");
