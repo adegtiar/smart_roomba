@@ -4,13 +4,22 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+
 #include <SimpleTimer.h>
 #include <Roomba.h>
 
+#ifndef STASSID
+#define STASSID "Fios-tr8JX-IoT"
+#define STAPSK  "awn56abeam69nil"
+#endif
+
 
 //USER CONFIGURED SECTION START//
-const char* ssid = "Fios-tr8JX-IoT";
-const char* password = "awn56abeam69nil";
+const char* ssid = STASSID;
+const char* password = STAPSK;
+const char* hostname = "roomba";
 const char* mqtt_server = "192.168.1.253";
 const int mqtt_port = 1883;
 const char *mqtt_user = NULL;
@@ -47,9 +56,11 @@ const String TOPIC_CHARGING = "roomba/charging";
 
 void log(String msg)
 {
-  //Serial.print("*****");
-  //Serial.print(msg);
-  //Serial.println("*****");
+  /*
+  Serial.print("*****");
+  Serial.print(msg);
+  Serial.println("*****");
+  */
 }
 
 void publish(String topic, String msg)
@@ -61,11 +72,38 @@ void publish(String topic, String msg)
 void setup_wifi()
 {
   log("Setting up wifi");
+  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
+  while (WiFi.waitForConnectResult() != WL_CONNECTED)
   {
-    delay(500);
+    log("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
   }
+  ArduinoOTA.setHostname("roomba");
+}
+
+void setup_ota()
+{
+  ArduinoOTA.setHostname("hostname");
+  ArduinoOTA.onStart([]() {
+    log("Start");
+  });
+  ArduinoOTA.onEnd([]() {
+    log("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    //logf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    //Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) log("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) log("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) log("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) log("Receive Failed");
+    else if (error == OTA_END_ERROR) log("End Failed");
+  });
+  ArduinoOTA.begin();
 }
 
 void reconnect()
@@ -197,23 +235,28 @@ void stayAwakeHigh()
 
 void setup()
 {
+  Serial.begin(115200);
+  setup_wifi();
+  setup_ota();
+
   pinMode(noSleepPin, OUTPUT);
   digitalWrite(noSleepPin, HIGH);
-  Serial.begin(115200);
   Serial.write(129);
   delay(50);
   Serial.write(11);
-  delay(50);
-  setup_wifi();
+  delay(100);
+
   log("Start of program");
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+  stayAwakeLow();
   timer.setInterval(5000, sendInfoRoomba);
   timer.setInterval(60000, stayAwakeLow);
 }
 
 void loop()
 {
+  ArduinoOTA.handle();
   if (!client.connected())
   {
     reconnect();
