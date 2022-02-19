@@ -41,7 +41,7 @@ long battery_Charging_state = 0;
 long battery_Total_mAh = 0;
 long battery_percent = 0;
 char battery_percent_send[50];
-char battery_Current_mAh_send[50];
+char battery_charging_state_send[50];
 uint8_t tempBuf[10];
 
 // Topics
@@ -52,12 +52,13 @@ const String TOPIC_BATTERY = "roomba/battery";
 const String TOPIC_CHARGING = "roomba/charging";
 const String TOPIC_DEBUG_COMMAND = "roomba/debug_command";
 const String TOPIC_DEBUG_LOG = "roomba/debug_log";
+const String TOPIC_ERROR_LOG = "roomba/error_log";
 
 //Functions
 
-void log(String msg)
+void logV(String msg)
 {
-  client.publish(TOPIC_DEBUG_LOG.c_str(), msg.c_str());
+  publish(TOPIC_DEBUG_LOG, msg);
   /*
     Serial.print("*****");
     Serial.print(msg);
@@ -65,20 +66,27 @@ void log(String msg)
   */
 }
 
+
+void logE(String msg)
+{
+  publish(TOPIC_DEBUG_LOG, msg);
+  publish(TOPIC_ERROR_LOG, msg);
+}
+
 void publish(String topic, String msg)
 {
-  //log("Publishing: (" + topic + ", " + msg + ")");
+  //logV("Publishing: (" + topic + ", " + msg + ")");
   client.publish(topic.c_str(), msg.c_str());
 }
 
 void setup_wifi()
 {
-  log("Setting up wifi");
+  logV("Setting up wifi");
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   while (WiFi.waitForConnectResult() != WL_CONNECTED)
   {
-    log("Connection Failed! Rebooting...");
+    logE("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
   }
@@ -89,21 +97,21 @@ void setup_ota()
 {
   ArduinoOTA.setHostname(hostname);
   ArduinoOTA.onStart([]() {
-    log("Start");
+    logV("Start");
   });
   ArduinoOTA.onEnd([]() {
-    log("\nEnd");
+    logV("\nEnd");
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     //logf("Progress: %u%%\r", (progress / (total / 100)));
   });
   ArduinoOTA.onError([](ota_error_t error) {
     //Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) log("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) log("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) log("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) log("Receive Failed");
-    else if (error == OTA_END_ERROR) log("End Failed");
+    if (error == OTA_AUTH_ERROR) logE("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) logE("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) logE("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) logE("Receive Failed");
+    else if (error == OTA_END_ERROR) logE("End Failed");
   });
   ArduinoOTA.begin();
 }
@@ -116,7 +124,7 @@ void reconnect()
   {
     if (retries < 50)
     {
-      log("Attempting to reconnect to MQTT");
+      logV("Attempting to reconnect to MQTT");
       // Attempt to connect
       if (client.connect(mqtt_client_name, mqtt_user, mqtt_pass, TOPIC_STATUS.c_str(), 0, 0, "Dead Somewhere"))
       {
@@ -143,7 +151,7 @@ void reconnect()
     }
     if (retries >= 50)
     {
-      log("Exceeded retry attempts. Restarting");
+      logE("Exceeded retry attempts. Restarting");
       ESP.restart();
     }
   }
@@ -164,13 +172,21 @@ void callback(char* topic, byte* payload, unsigned int length)
     {
       returnToDock();
     }
-    if (newPayload == "reboot")
+    if (newPayload == "reboot-esp")
     {
-      reboot();
+      rebootESP();
     }
-    if (newPayload == "uturn")
+    if (newPayload == "reset-roomba")
+    {
+      resetRoomba();
+    }
+    if (newPayload == "u-turn")
     {
       turnAround();
+    }
+    if (newPayload == "wake")
+    {
+      stayAwakeLow();
     }
   }
   if (newTopic == TOPIC_DEBUG_COMMAND)
@@ -181,16 +197,16 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 void toggleCleaning()
 {
-  log("Sending clean command");
+  logV("Sending clean command");
   roomba.start();
   roomba.cover();
   publish(TOPIC_STATUS, "Cleaning");
-  log("Done sending cleaning command. Publishing status");
+  logV("Done sending cleaning command. Publishing status");
 }
 
 void returnToDock()
 {
-  log("Sending dock command");
+  logV("Sending dock command");
   delay(20);
   roomba.start();
   delay(20);
@@ -198,12 +214,12 @@ void returnToDock()
   delay(20);
   roomba.dock();
   publish(TOPIC_STATUS, "Returning");
-  log("Done sending dock command. Publishing status");
+  logV("Done sending dock command. Publishing status");
 }
 
 void turnAround()
 {
-  log("Sending u-turn command");
+  logV("Sending u-turn command");
   roomba.start();
   delay(50);
   // Manually write control flag 130 to put into safe mode (library doesn't support).
@@ -214,10 +230,17 @@ void turnAround()
   roomba.start();
 }
 
-void reboot()
+void rebootESP()
 {
-  log("Rebooting the esp chip");
+  logV("Rebooting the esp chip");
   ESP.restart();
+}
+
+void resetRoomba()
+{
+  logV("Resetting roomba");
+  roomba.reset();
+  delay(3000);
 }
 
 void debugCommand(String payload)
@@ -225,21 +248,31 @@ void debugCommand(String payload)
   int command = atoi(payload.c_str());
   if (command != 0)
   {
-    log("Sending manual command " + payload + " on serial");
+    logV("Sending manual command " + payload + " on serial");
     roomba.start();
     delay(50);
     Serial.write(command);
   } else {
-    log("Invalid manual command " + payload);
+    logE("Invalid manual command " + payload);
   }
 }
 
 void sendInfoRoomba()
 {
-  log("Getting info from roomba sensors");
+  logV("Getting info from roomba sensors");
   roomba.start();
   roomba.getSensors(Roomba::SensorChargingState, tempBuf, 1);
   battery_Charging_state = tempBuf[0];
+
+  String temp_str = String(battery_Charging_state);
+  temp_str.toCharArray(battery_charging_state_send, temp_str.length() + 1); //packaging up the data to publish to mqtt
+  if (battery_Charging_state < 0 || battery_Charging_state > 5) {
+    String error_msg = "Invalid charging state: " + temp_str;
+    logE(error_msg);
+    // Toggle wake-up command as a workaround.
+    stayAwakeLow();
+    return;
+  }
   delay(50);
 
   roomba.getSensors(Roomba::SensorBatteryCharge, tempBuf, 2);
@@ -254,29 +287,30 @@ void sendInfoRoomba()
     int nBatPcent = 100 * battery_Current_mAh / battery_Total_mAh;
     String temp_str2 = String(nBatPcent);
     temp_str2.toCharArray(battery_percent_send, temp_str2.length() + 1); //packaging up the data to publish to mqtt
-    log("Got battery info. Publishing (" + temp_str2 + "%)");
+    logV("Got battery info. Publishing (" + temp_str2 + "%)");
     publish(TOPIC_BATTERY, battery_percent_send);
   }
 
   if (battery_Total_mAh == 0)
   {
-    log("Failed to get battery info. Publishing error");
+    logE("Failed to get battery info. Publishing error");
     publish(TOPIC_BATTERY, "NO DATA");
   }
-  String temp_str = String(battery_Charging_state);
-  temp_str.toCharArray(battery_Current_mAh_send, temp_str.length() + 1); //packaging up the data to publish to mqtt
-  publish(TOPIC_CHARGING, battery_Current_mAh_send);
+
+  publish(TOPIC_CHARGING, battery_charging_state_send);
 }
 
 void stayAwakeLow()
 {
-  log("Sending stayalive ping on D4");
+  // TODO: add mutex for concurrent calls.
+  logV("Sending stayalive ping on D4");
   digitalWrite(noSleepPin, LOW);
   timer.setTimeout(1000, stayAwakeHigh);
 }
 
 void stayAwakeHigh()
 {
+  logV("Setting D4 back to high");
   digitalWrite(noSleepPin, HIGH);
 }
 
@@ -296,7 +330,7 @@ void setup()
   roomba.start();
   roomba.baud(Roomba::Baud115200);
 
-  log("Start of program");
+  logV("Start of program");
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
 
