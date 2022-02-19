@@ -36,6 +36,7 @@ Roomba roomba(&Serial, Roomba::Baud115200);
 bool toggle = true;
 const int noSleepPin = 2;
 bool boot = true;
+bool busy = false;
 long battery_Current_mAh = 0;
 long battery_Charging_state = 0;
 long battery_Total_mAh = 0;
@@ -239,8 +240,10 @@ void rebootESP()
 void resetRoomba()
 {
   logV("Resetting roomba");
+  busy = true;
   roomba.reset();
   delay(3000);
+  busy = true;
 }
 
 void debugCommand(String payload)
@@ -260,6 +263,11 @@ void debugCommand(String payload)
 void sendInfoRoomba()
 {
   logV("Getting info from roomba sensors");
+  if (busy)
+  {
+    logV("Skipping... busy");
+    return;
+  }
   roomba.start();
   roomba.getSensors(Roomba::SensorChargingState, tempBuf, 1);
   battery_Charging_state = tempBuf[0];
@@ -302,6 +310,13 @@ void sendInfoRoomba()
 
 void stayAwakeLow()
 {
+  if (busy)
+  {
+    // Already doing something -- skip.
+    return;
+  }
+  // TODO: add mutex to fix concurrency bug.
+  busy = true;
   // TODO: add mutex for concurrent calls.
   logV("Sending stayalive ping on D4");
   digitalWrite(noSleepPin, LOW);
@@ -312,6 +327,8 @@ void stayAwakeHigh()
 {
   logV("Setting D4 back to high");
   digitalWrite(noSleepPin, HIGH);
+  delay(50);
+  busy = false;
 }
 
 
