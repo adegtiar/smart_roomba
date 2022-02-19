@@ -167,7 +167,6 @@ void callback(char* topic, byte* payload, unsigned int length)
   }
 }
 
-
 void toggleCleaning()
 {
   log("Sending clean command");
@@ -257,8 +256,12 @@ void setup()
   log("Start of program");
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+
+  // Wake up the roomba if it's asleep.
   stayAwakeLow();
+  // Send info from sensors every 5 seconds.
   timer.setInterval(5000, sendInfoRoomba);
+  // Toggle the stay-awake signal every minute.
   timer.setInterval(60000, stayAwakeLow);
 }
 
