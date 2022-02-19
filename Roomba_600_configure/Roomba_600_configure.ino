@@ -171,11 +171,8 @@ void callback(char* topic, byte* payload, unsigned int length)
 void toggleCleaning()
 {
   log("Sending clean command");
-  Serial.write(128);
-  delay(50);
-  //Serial.write(131);
-  //delay(50);
-  Serial.write(135);
+  roomba.start();
+  roomba.cover();
   publish(TOPIC_STATUS, "Cleaning");
   log("Done sending cleaning command. Publishing status");
 }
@@ -183,11 +180,8 @@ void toggleCleaning()
 void returnToDock()
 {
   log("Sending dock command");
-  Serial.write(128);
-  delay(50);
-  //Serial.write(131);
-  //delay(50);
-  Serial.write(143);
+  roomba.start();
+  roomba.dock();
   publish(TOPIC_STATUS, "Returning");
   log("Done sending dock command. Publishing status");
 }
@@ -202,15 +196,15 @@ void sendInfoRoomba()
 {
   log("Getting info from roomba sensors");
   roomba.start();
-  roomba.getSensors(roomba.SensorChargingState, tempBuf, 1);
+  roomba.getSensors(Roomba::SensorChargingState, tempBuf, 1);
   battery_Charging_state = tempBuf[0];
   delay(50);
 
-  roomba.getSensors(roomba.SensorBatteryCharge, tempBuf, 2);
+  roomba.getSensors(Roomba::SensorBatteryCharge, tempBuf, 2);
   battery_Current_mAh = tempBuf[1] + 256 * tempBuf[0];
   delay(50);
 
-  roomba.getSensors(roomba.SensorBatteryCapacity, tempBuf, 2);
+  roomba.getSensors(Roomba::SensorBatteryCapacity, tempBuf, 2);
   battery_Total_mAh = tempBuf[1] + 256 * tempBuf[0];
 
   if (battery_Total_mAh != 0)
@@ -257,10 +251,8 @@ void setup()
   digitalWrite(noSleepPin, HIGH);
 
   // Set baud rate to 115200 (baud code 11)
-  Serial.write(129);
-  delay(50);
-  Serial.write(11);
-  delay(100);
+  roomba.start();
+  roomba.baud(Roomba::Baud115200);
 
   log("Start of program");
   client.setServer(mqtt_server, mqtt_port);
