@@ -32,7 +32,6 @@ PubSubClient client(espClient);
 SimpleTimer timer;
 Roomba roomba(&Serial, Roomba::Baud115200);
 
-
 // Variables
 bool toggle = true;
 const int noSleepPin = 2;
@@ -85,7 +84,7 @@ void setup_wifi()
 
 void setup_ota()
 {
-  ArduinoOTA.setHostname("hostname");
+  ArduinoOTA.setHostname(hostname);
   ArduinoOTA.onStart([]() {
     log("Start");
   });
@@ -161,13 +160,17 @@ void callback(char* topic, byte* payload, unsigned int length)
     {
       stopCleaning();
     }
+    if (newPayload == "reboot")
+    {
+      reboot();
+    }
   }
 }
 
 
 void startCleaning()
 {
-  log("Sending cleaning command");
+  log("Sending clean command");
   Serial.write(128);
   delay(50);
   //Serial.write(131);
@@ -187,6 +190,12 @@ void stopCleaning()
   Serial.write(143);
   publish(TOPIC_STATUS, "Returning");
   log("Done sending stop command. Publishing status");
+}
+
+void reboot()
+{
+  log("Rebooting the esp chip");
+  ESP.restart();
 }
 
 void sendInfoRoomba()
