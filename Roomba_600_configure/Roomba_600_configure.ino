@@ -45,7 +45,7 @@ char battery_Current_mAh_send[50];
 uint8_t tempBuf[10];
 
 // Topics
-const String TOPIC_CHECKIN = "checkIn/roomba";
+const String TOPIC_CHECKIN = "roomba/checkIn";
 const String TOPIC_COMMANDS = "roomba/commands";
 const String TOPIC_STATUS = "roomba/status";
 const String TOPIC_BATTERY = "roomba/battery";
