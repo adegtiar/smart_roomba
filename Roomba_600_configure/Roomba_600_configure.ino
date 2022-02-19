@@ -50,11 +50,14 @@ const String TOPIC_COMMANDS = "roomba/commands";
 const String TOPIC_STATUS = "roomba/status";
 const String TOPIC_BATTERY = "roomba/battery";
 const String TOPIC_CHARGING = "roomba/charging";
+const String TOPIC_DEBUG_COMMAND = "roomba/debug_command";
+const String TOPIC_DEBUG_LOG = "roomba/debug_log";
 
 //Functions
 
 void log(String msg)
 {
+  client.publish(TOPIC_DEBUG_LOG.c_str(), msg.c_str());
   /*
     Serial.print("*****");
     Serial.print(msg);
@@ -64,7 +67,7 @@ void log(String msg)
 
 void publish(String topic, String msg)
 {
-  log("Publishing: (" + topic + ", " + msg + ")");
+  //log("Publishing: (" + topic + ", " + msg + ")");
   client.publish(topic.c_str(), msg.c_str());
 }
 
@@ -129,6 +132,7 @@ void reconnect()
         }
         // ... and resubscribe
         client.subscribe(TOPIC_COMMANDS.c_str());
+        client.subscribe(TOPIC_DEBUG_COMMAND.c_str());
       }
       else
       {
@@ -169,6 +173,10 @@ void callback(char* topic, byte* payload, unsigned int length)
       turnAround();
     }
   }
+  if (newTopic == TOPIC_DEBUG_COMMAND)
+  {
+    debugCommand(newPayload);
+  }
 }
 
 void toggleCleaning()
@@ -183,7 +191,11 @@ void toggleCleaning()
 void returnToDock()
 {
   log("Sending dock command");
+  delay(20);
   roomba.start();
+  delay(20);
+  roomba.safeMode();
+  delay(20);
   roomba.dock();
   publish(TOPIC_STATUS, "Returning");
   log("Done sending dock command. Publishing status");
@@ -206,6 +218,20 @@ void reboot()
 {
   log("Rebooting the esp chip");
   ESP.restart();
+}
+
+void debugCommand(String payload)
+{
+  int command = atoi(payload.c_str());
+  if (command != 0)
+  {
+    log("Sending manual command " + payload + " on serial");
+    roomba.start();
+    delay(50);
+    Serial.write(command);
+  } else {
+    log("Invalid manual command " + payload);
+  }
 }
 
 void sendInfoRoomba()
