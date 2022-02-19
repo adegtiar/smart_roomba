@@ -56,9 +56,9 @@ const String TOPIC_CHARGING = "roomba/charging";
 void log(String msg)
 {
   /*
-  Serial.print("*****");
-  Serial.print(msg);
-  Serial.println("*****");
+    Serial.print("*****");
+    Serial.print(msg);
+    Serial.println("*****");
   */
 }
 
@@ -164,6 +164,10 @@ void callback(char* topic, byte* payload, unsigned int length)
     {
       reboot();
     }
+    if (newPayload == "uturn")
+    {
+      turnAround();
+    }
   }
 }
 
@@ -183,6 +187,19 @@ void returnToDock()
   roomba.dock();
   publish(TOPIC_STATUS, "Returning");
   log("Done sending dock command. Publishing status");
+}
+
+void turnAround()
+{
+  log("Sending u-turn command");
+  roomba.start();
+  delay(50);
+  // Manually write control flag 130 to put into safe mode (library doesn't support).
+  Serial.write(130);
+  delay(50);
+  roomba.drive(270, Roomba::DriveInPlaceClockwise);
+  delay(1450);
+  roomba.start();
 }
 
 void reboot()
