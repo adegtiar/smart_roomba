@@ -37,7 +37,7 @@ bool toggle = true;
 const int noSleepPin = 2;
 bool boot = true;
 long battery_Current_mAh = 0;
-long battery_Voltage = 0;
+long battery_Charging_state = 0;
 long battery_Total_mAh = 0;
 long battery_percent = 0;
 char battery_percent_send[50];
@@ -152,13 +152,13 @@ void callback(char* topic, byte* payload, unsigned int length)
   String newPayload = String((char *)payload);
   if (newTopic == TOPIC_COMMANDS)
   {
-    if (newPayload == "start")
+    if (newPayload == "clean")
     {
-      startCleaning();
+      toggleCleaning();
     }
-    if (newPayload == "stop")
+    if (newPayload == "dock")
     {
-      stopCleaning();
+      returnToDock();
     }
     if (newPayload == "reboot")
     {
@@ -168,7 +168,7 @@ void callback(char* topic, byte* payload, unsigned int length)
 }
 
 
-void startCleaning()
+void toggleCleaning()
 {
   log("Sending clean command");
   Serial.write(128);
@@ -180,16 +180,16 @@ void startCleaning()
   log("Done sending cleaning command. Publishing status");
 }
 
-void stopCleaning()
+void returnToDock()
 {
-  log("Sending stop command");
+  log("Sending dock command");
   Serial.write(128);
   delay(50);
-  Serial.write(131);
-  delay(50);
+  //Serial.write(131);
+  //delay(50);
   Serial.write(143);
   publish(TOPIC_STATUS, "Returning");
-  log("Done sending stop command. Publishing status");
+  log("Done sending dock command. Publishing status");
 }
 
 void reboot()
@@ -202,14 +202,17 @@ void sendInfoRoomba()
 {
   log("Getting info from roomba sensors");
   roomba.start();
-  roomba.getSensors(21, tempBuf, 1);
-  battery_Voltage = tempBuf[0];
+  roomba.getSensors(roomba.SensorChargingState, tempBuf, 1);
+  battery_Charging_state = tempBuf[0];
   delay(50);
-  roomba.getSensors(25, tempBuf, 2);
+
+  roomba.getSensors(roomba.SensorBatteryCharge, tempBuf, 2);
   battery_Current_mAh = tempBuf[1] + 256 * tempBuf[0];
   delay(50);
-  roomba.getSensors(26, tempBuf, 2);
+
+  roomba.getSensors(roomba.SensorBatteryCapacity, tempBuf, 2);
   battery_Total_mAh = tempBuf[1] + 256 * tempBuf[0];
+
   if (battery_Total_mAh != 0)
   {
     int nBatPcent = 100 * battery_Current_mAh / battery_Total_mAh;
@@ -218,12 +221,13 @@ void sendInfoRoomba()
     log("Got battery info. Publishing (" + temp_str2 + "%)");
     publish(TOPIC_BATTERY, battery_percent_send);
   }
+
   if (battery_Total_mAh == 0)
   {
     log("Failed to get battery info. Publishing error");
     publish(TOPIC_BATTERY, "NO DATA");
   }
-  String temp_str = String(battery_Voltage);
+  String temp_str = String(battery_Charging_state);
   temp_str.toCharArray(battery_Current_mAh_send, temp_str.length() + 1); //packaging up the data to publish to mqtt
   publish(TOPIC_CHARGING, battery_Current_mAh_send);
 }
@@ -241,15 +245,18 @@ void stayAwakeHigh()
 }
 
 
-
 void setup()
 {
+  // Set up the serial output to baud rate 115200.
   Serial.begin(115200);
   setup_wifi();
   setup_ota();
 
+  // Enable stay-awake pin, or else roomba will go to sleep.
   pinMode(noSleepPin, OUTPUT);
   digitalWrite(noSleepPin, HIGH);
+
+  // Set baud rate to 115200 (baud code 11)
   Serial.write(129);
   delay(50);
   Serial.write(11);
