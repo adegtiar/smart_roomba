@@ -15,6 +15,9 @@
 #define STAPSK  "awn56abeam69nil"
 #endif
 
+#define DEBUG_ENABLED true
+#define SERIAL_DEBUG false
+
 
 //USER CONFIGURED SECTION START//
 const char* ssid = STASSID;
@@ -28,7 +31,7 @@ const char *mqtt_client_name = "Roomba"; // Client connections can't have the sa
 //USER CONFIGURED SECTION END//
 
 WiFiClient espClient;
-PubSubClient client(espClient);
+PubSubClient mqttClient(espClient);
 SimpleTimer timer;
 Roomba roomba(&Serial, Roomba::Baud115200);
 
@@ -59,12 +62,14 @@ const String TOPIC_ERROR_LOG = "roomba/error_log";
 
 void logV(String msg)
 {
+  #if DEBUG_ENABLED
   publish(TOPIC_DEBUG_LOG, msg);
-  /*
-    Serial.print("*****");
-    Serial.print(msg);
-    Serial.println("*****");
-  */
+  #endif
+  #if SERIAL_DEBUG
+  Serial.print("*****");
+  Serial.print(msg);
+  Serial.println("*****");
+  #endif
 }
 
 
@@ -77,7 +82,7 @@ void logE(String msg)
 void publish(String topic, String msg)
 {
   //logV("Publishing: (" + topic + ", " + msg + ")");
-  client.publish(topic.c_str(), msg.c_str());
+  mqttClient.publish(topic.c_str(), msg.c_str());
 }
 
 void setup_wifi()
@@ -121,13 +126,13 @@ void reconnect()
 {
   // Loop until we're reconnected
   int retries = 0;
-  while (!client.connected())
+  while (!mqttClient.connected())
   {
     if (retries < 50)
     {
       logV("Attempting to reconnect to MQTT");
       // Attempt to connect
-      if (client.connect(mqtt_client_name, mqtt_user, mqtt_pass, TOPIC_STATUS.c_str(), 0, 0, "Dead Somewhere"))
+      if (mqttClient.connect(mqtt_client_name, mqtt_user, mqtt_pass, TOPIC_STATUS.c_str(), 0, 0, "Dead Somewhere"))
       {
         // Once connected, publish an announcement...
         if (boot == false)
@@ -140,8 +145,8 @@ void reconnect()
           boot = false;
         }
         // ... and resubscribe
-        client.subscribe(TOPIC_COMMANDS.c_str());
-        client.subscribe(TOPIC_DEBUG_COMMAND.c_str());
+        mqttClient.subscribe(TOPIC_COMMANDS.c_str());
+        mqttClient.subscribe(TOPIC_DEBUG_COMMAND.c_str());
       }
       else
       {
@@ -262,10 +267,10 @@ void debugCommand(String payload)
 
 void sendInfoRoomba()
 {
-  logV("Getting info from roomba sensors");
+  //logV("Getting info from roomba sensors");
   if (busy)
   {
-    logV("Skipping... busy");
+    logV("Skipping sendInfo... busy");
     return;
   }
   roomba.start();
@@ -295,7 +300,7 @@ void sendInfoRoomba()
     int nBatPcent = 100 * battery_Current_mAh / battery_Total_mAh;
     String temp_str2 = String(nBatPcent);
     temp_str2.toCharArray(battery_percent_send, temp_str2.length() + 1); //packaging up the data to publish to mqtt
-    logV("Got battery info. Publishing (" + temp_str2 + "%)");
+    //logV("Got battery info. Publishing (" + temp_str2 + "%)");
     publish(TOPIC_BATTERY, battery_percent_send);
   }
 
@@ -348,8 +353,8 @@ void setup()
   roomba.baud(Roomba::Baud115200);
 
   logV("Start of program");
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(callback);
+  mqttClient.setServer(mqtt_server, mqtt_port);
+  mqttClient.setCallback(callback);
 
   // Wake up the roomba if it's asleep.
   stayAwakeLow();
@@ -362,10 +367,10 @@ void setup()
 void loop()
 {
   ArduinoOTA.handle();
-  if (!client.connected())
+  if (!mqttClient.connected())
   {
     reconnect();
   }
-  client.loop();
+  mqttClient.loop();
   timer.run();
 }
