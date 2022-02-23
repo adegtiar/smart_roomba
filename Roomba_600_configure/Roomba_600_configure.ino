@@ -47,6 +47,7 @@ long battery_percent = 0;
 char battery_percent_send[50];
 char battery_charging_state_send[50];
 uint8_t tempBuf[10];
+uint8_t sensorBuf[1];
 
 // Topics
 const String TOPIC_CHECKIN = "roomba/checkIn";
@@ -72,7 +73,6 @@ void logV(String msg)
   #endif
 }
 
-
 void logE(String msg)
 {
   publish(TOPIC_DEBUG_LOG, msg);
@@ -84,6 +84,249 @@ void publish(String topic, String msg)
   //logV("Publishing: (" + topic + ", " + msg + ")");
   mqttClient.publish(topic.c_str(), msg.c_str());
 }
+
+void callback(char* topic, byte* payload, unsigned int length)
+{
+  String newTopic = topic;
+  payload[length] = '\0';
+  String newPayload = String((char *)payload);
+  if (newTopic == TOPIC_COMMANDS)
+  {
+    if (newPayload == "clean")
+    {
+      toggleCleaning();
+    }
+    if (newPayload == "dock")
+    {
+      returnToDock();
+    }
+    if (newPayload == "reboot-esp")
+    {
+      rebootESP();
+    }
+    if (newPayload == "reset-roomba")
+    {
+      resetRoomba();
+    }
+    if (newPayload == "u-turn")
+    {
+      turnAround();
+    }
+    if (newPayload == "wake")
+    {
+      stayAwakeLow();
+    }
+    if (newPayload == "get-mode")
+    {
+      sendModeInfo();
+    }
+    if (newPayload == "get-base")
+    {
+      sendBaseInfo();
+    }
+  }
+  if (newTopic == TOPIC_DEBUG_COMMAND)
+  {
+    debugCommand(newPayload);
+  }
+}
+
+void toggleCleaning()
+{
+  logV("Sending clean command");
+  busy = true;
+  roomba.start();
+  roomba.cover();
+  busy = false;
+  publish(TOPIC_STATUS, "Cleaning");
+  logV("Done sending cleaning command. Publishing status");
+}
+
+void returnToDock()
+{
+  logV("Sending dock command");
+  delay(20);
+  busy = true;
+  roomba.start();
+  delay(20);
+  roomba.safeMode();
+  delay(20);
+  roomba.dock();
+  busy = false;
+  publish(TOPIC_STATUS, "Returning");
+  logV("Done sending dock command. Publishing status");
+}
+
+void turnAround()
+{
+  logV("Sending u-turn command");
+  busy = true;
+  roomba.start();
+  delay(50);
+  // Manually write control flag 130 to put into safe mode (library doesn't support).
+  Serial.write(130);
+  delay(50);
+  roomba.drive(270, Roomba::DriveInPlaceClockwise);
+  delay(1450);
+  //roomba.start();
+  busy = false;
+}
+
+void rebootESP()
+{
+  logV("Rebooting the esp chip");
+  ESP.restart();
+}
+
+void resetRoomba()
+{
+  logV("Resetting roomba");
+  busy = true;
+  roomba.reset();
+  delay(3000);
+  busy = false;
+}
+
+void debugCommand(String payload)
+{
+  int command = atoi(payload.c_str());
+  if (command != 0)
+  {
+    logV("Sending manual command " + payload + " on serial");
+    busy = true;
+    roomba.start();
+    delay(50);
+    Serial.write(command);
+    busy = false;
+  } else {
+    logE("Invalid manual command " + payload);
+  }
+}
+
+void sendModeInfo()
+{
+  busy = true;
+  roomba.start();
+  roomba.getSensors(Roomba::SensorOIMode, sensorBuf, 1);
+  busy = false;
+  String oiModeStr;
+  switch(sensorBuf[0]) {
+    case 0:
+      oiModeStr = "OFF";
+      break;
+    case 1:
+      oiModeStr = "PASSIVE";
+      break;
+    case 2:
+      oiModeStr = "SAFE";
+      break;
+    case 3:
+      oiModeStr = "FULL";
+      break;
+    default:
+      oiModeStr = "error getting OI mode";
+  }
+  publish(TOPIC_DEBUG_LOG, "OI Mode: " + oiModeStr);
+}
+
+void sendBaseInfo()
+{
+  busy = true;
+  roomba.start();
+  roomba.getSensors(Roomba::SensorChargingSourcesAvailable, sensorBuf, 1);
+  busy = false;
+  String outBuf;
+  switch(sensorBuf[0]) {
+    case 0:
+      outBuf = "OFF DOCK";
+      break;
+    case 1:
+      outBuf = "INTERNAL CHARGER";
+      break;
+    case 2:
+      outBuf = "ON DOCK";
+      break;
+    case 3:
+      outBuf = "ON DOCK + INTERNAL CHARGER";
+      break;
+    default:
+      outBuf = "error getting charging sources";
+  }
+  publish(TOPIC_DEBUG_LOG, "Dock status: " + outBuf);
+}
+
+void sendInfoRoomba()
+{
+  //logV("Getting info from roomba sensors");
+  if (busy)
+  {
+    logV("Skipping sendInfo... busy");
+    return;
+  }
+  roomba.start();
+  roomba.getSensors(Roomba::SensorChargingState, tempBuf, 1);
+  battery_Charging_state = tempBuf[0];
+
+  String temp_str = String(battery_Charging_state);
+  temp_str.toCharArray(battery_charging_state_send, temp_str.length() + 1); //packaging up the data to publish to mqtt
+  if (battery_Charging_state < 0 || battery_Charging_state > 5) {
+    String error_msg = "Invalid charging state: " + temp_str;
+    logE(error_msg);
+    // Toggle wake-up command as a workaround.
+    stayAwakeLow();
+    return;
+  }
+  delay(50);
+
+  roomba.getSensors(Roomba::SensorBatteryCharge, tempBuf, 2);
+  battery_Current_mAh = tempBuf[1] + 256 * tempBuf[0];
+  delay(50);
+
+  roomba.getSensors(Roomba::SensorBatteryCapacity, tempBuf, 2);
+  battery_Total_mAh = tempBuf[1] + 256 * tempBuf[0];
+
+  if (battery_Total_mAh != 0)
+  {
+    int nBatPcent = 100 * battery_Current_mAh / battery_Total_mAh;
+    String temp_str2 = String(nBatPcent);
+    temp_str2.toCharArray(battery_percent_send, temp_str2.length() + 1); //packaging up the data to publish to mqtt
+    //logV("Got battery info. Publishing (" + temp_str2 + "%)");
+    publish(TOPIC_BATTERY, battery_percent_send);
+  }
+
+  if (battery_Total_mAh == 0)
+  {
+    logE("Failed to get battery info. Publishing error");
+    publish(TOPIC_BATTERY, "NO DATA");
+  }
+
+  publish(TOPIC_CHARGING, battery_charging_state_send);
+  logV("Roomba battery is " + String(battery_percent_send) + "%, Charging state is: " + String(battery_charging_state_send));
+}
+
+void stayAwakeLow()
+{
+  if (busy)
+  {
+    // Already doing something -- skip.
+    return;
+  }
+  // TODO: add mutex to fix concurrency bug.
+  busy = true;
+  // TODO: add mutex for concurrent calls.
+  logV("Sending stayalive ping on D4");
+  digitalWrite(noSleepPin, LOW);
+  timer.setTimeout(1000, stayAwakeHigh);
+}
+
+void stayAwakeHigh()
+{
+  logV("Setting D4 back to high");
+  digitalWrite(noSleepPin, HIGH);
+  delay(50);
+  busy = false;
+}
+
 
 void setup_wifi()
 {
@@ -162,180 +405,6 @@ void reconnect()
     }
   }
 }
-
-void callback(char* topic, byte* payload, unsigned int length)
-{
-  String newTopic = topic;
-  payload[length] = '\0';
-  String newPayload = String((char *)payload);
-  if (newTopic == TOPIC_COMMANDS)
-  {
-    if (newPayload == "clean")
-    {
-      toggleCleaning();
-    }
-    if (newPayload == "dock")
-    {
-      returnToDock();
-    }
-    if (newPayload == "reboot-esp")
-    {
-      rebootESP();
-    }
-    if (newPayload == "reset-roomba")
-    {
-      resetRoomba();
-    }
-    if (newPayload == "u-turn")
-    {
-      turnAround();
-    }
-    if (newPayload == "wake")
-    {
-      stayAwakeLow();
-    }
-  }
-  if (newTopic == TOPIC_DEBUG_COMMAND)
-  {
-    debugCommand(newPayload);
-  }
-}
-
-void toggleCleaning()
-{
-  logV("Sending clean command");
-  roomba.start();
-  roomba.cover();
-  publish(TOPIC_STATUS, "Cleaning");
-  logV("Done sending cleaning command. Publishing status");
-}
-
-void returnToDock()
-{
-  logV("Sending dock command");
-  delay(20);
-  roomba.start();
-  delay(20);
-  roomba.safeMode();
-  delay(20);
-  roomba.dock();
-  publish(TOPIC_STATUS, "Returning");
-  logV("Done sending dock command. Publishing status");
-}
-
-void turnAround()
-{
-  logV("Sending u-turn command");
-  roomba.start();
-  delay(50);
-  // Manually write control flag 130 to put into safe mode (library doesn't support).
-  Serial.write(130);
-  delay(50);
-  roomba.drive(270, Roomba::DriveInPlaceClockwise);
-  delay(1450);
-  roomba.start();
-}
-
-void rebootESP()
-{
-  logV("Rebooting the esp chip");
-  ESP.restart();
-}
-
-void resetRoomba()
-{
-  logV("Resetting roomba");
-  busy = true;
-  roomba.reset();
-  delay(3000);
-  busy = true;
-}
-
-void debugCommand(String payload)
-{
-  int command = atoi(payload.c_str());
-  if (command != 0)
-  {
-    logV("Sending manual command " + payload + " on serial");
-    roomba.start();
-    delay(50);
-    Serial.write(command);
-  } else {
-    logE("Invalid manual command " + payload);
-  }
-}
-
-void sendInfoRoomba()
-{
-  //logV("Getting info from roomba sensors");
-  if (busy)
-  {
-    logV("Skipping sendInfo... busy");
-    return;
-  }
-  roomba.start();
-  roomba.getSensors(Roomba::SensorChargingState, tempBuf, 1);
-  battery_Charging_state = tempBuf[0];
-
-  String temp_str = String(battery_Charging_state);
-  temp_str.toCharArray(battery_charging_state_send, temp_str.length() + 1); //packaging up the data to publish to mqtt
-  if (battery_Charging_state < 0 || battery_Charging_state > 5) {
-    String error_msg = "Invalid charging state: " + temp_str;
-    logE(error_msg);
-    // Toggle wake-up command as a workaround.
-    stayAwakeLow();
-    return;
-  }
-  delay(50);
-
-  roomba.getSensors(Roomba::SensorBatteryCharge, tempBuf, 2);
-  battery_Current_mAh = tempBuf[1] + 256 * tempBuf[0];
-  delay(50);
-
-  roomba.getSensors(Roomba::SensorBatteryCapacity, tempBuf, 2);
-  battery_Total_mAh = tempBuf[1] + 256 * tempBuf[0];
-
-  if (battery_Total_mAh != 0)
-  {
-    int nBatPcent = 100 * battery_Current_mAh / battery_Total_mAh;
-    String temp_str2 = String(nBatPcent);
-    temp_str2.toCharArray(battery_percent_send, temp_str2.length() + 1); //packaging up the data to publish to mqtt
-    //logV("Got battery info. Publishing (" + temp_str2 + "%)");
-    publish(TOPIC_BATTERY, battery_percent_send);
-  }
-
-  if (battery_Total_mAh == 0)
-  {
-    logE("Failed to get battery info. Publishing error");
-    publish(TOPIC_BATTERY, "NO DATA");
-  }
-
-  publish(TOPIC_CHARGING, battery_charging_state_send);
-}
-
-void stayAwakeLow()
-{
-  if (busy)
-  {
-    // Already doing something -- skip.
-    return;
-  }
-  // TODO: add mutex to fix concurrency bug.
-  busy = true;
-  // TODO: add mutex for concurrent calls.
-  logV("Sending stayalive ping on D4");
-  digitalWrite(noSleepPin, LOW);
-  timer.setTimeout(1000, stayAwakeHigh);
-}
-
-void stayAwakeHigh()
-{
-  logV("Setting D4 back to high");
-  digitalWrite(noSleepPin, HIGH);
-  delay(50);
-  busy = false;
-}
-
 
 void setup()
 {
