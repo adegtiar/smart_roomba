@@ -175,6 +175,7 @@ void turnAround()
 void rebootESP()
 {
   logV("Rebooting the esp chip");
+  delay(100);
   ESP.restart();
 }
 
@@ -384,6 +385,7 @@ void reconnect()
         }
         if (boot == true)
         {
+          logV("Rebooted");
           publish(TOPIC_CHECKIN, "Rebooted");
           boot = false;
         }
